@@ -4,80 +4,141 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>积分后台</title>
+  <link rel="stylesheet" href="https://unpkg.com/@picocss/pico@2/css/pico.min.css">
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 20px auto; padding: 0 12px; }
-    h1 { font-size: 20px; }
-    input, button { padding: 8px; margin: 4px 0; }
-    .card { border: 1px solid #ddd; padding: 12px; margin: 12px 0; border-radius: 8px; }
-    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    .col { flex: 1; min-width: 220px; }
+    :root { --neon: #8b5cf6; --neon2: #22d3ee; }
+    body { background: linear-gradient(120deg, rgba(139,92,246,.15), rgba(34,211,238,.15)) fixed; min-height:100dvh; overflow-x:hidden; }
+    .bg-anim { position: fixed; inset: -20vh -20vw auto -20vw; height: 80vh; z-index: -1;
+      background: radial-gradient(60% 60% at 30% 20%, rgba(139,92,246,.35), transparent 60%),
+                  radial-gradient(50% 50% at 80% 30%, rgba(34,211,238,.25), transparent 60%),
+                  radial-gradient(50% 50% at 40% 80%, rgba(236,72,153,.2), transparent 60%);
+      filter: blur(40px); animation: float 12s ease-in-out infinite alternate; }
+    @keyframes float { from { transform: translateY(-20px) } to { transform: translateY(20px) } }
+    .stack { display:grid; gap:1rem; }
+    .grid { display:grid; gap:1rem; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); }
+    .muted { color: var(--muted-color); font-size: .9rem; }
+    article { background: rgba(255,255,255,.6); backdrop-filter: saturate(150%) blur(8px); border: 1px solid rgba(255,255,255,.35); border-radius: 14px; padding: 1rem; }
+    [data-theme="dark"] article { background: rgba(20,20,30,.45); border-color: rgba(255,255,255,.08); }
+    button:hover { box-shadow: 0 0 0 2px color-mix(in oklab, var(--neon) 50%, transparent), 0 10px 24px -8px color-mix(in oklab, var(--neon2) 35%, transparent); }
+
+    /* Navbar & Footer to match index */
+    .navbar { position: sticky; top: 0; z-index: 20; background: linear-gradient(180deg, #5b79ff, #6a8bff); color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.08); }
+    .navbar .wrap { display:flex; align-items:center; justify-content:space-between; padding:.75rem 1rem; }
+    .navbar .brand { display:flex; align-items:center; gap:.5rem; font-weight:700; }
+    .navbar .actions { display:flex; gap:.5rem; align-items:center; }
+    .pill { background: rgba(255,255,255,.2); border: 1px solid rgba(255,255,255,.35); color:#fff; border-radius:999px; padding:.4rem .8rem; }
+    .pill:hover { background: rgba(255,255,255,.3); }
+    .footer { margin-top: 3rem; background:#111827; color:#cbd5e1; padding:1.2rem; box-shadow: 0 -8px 24px rgba(0,0,0,.12) inset; }
+    .footer .wrap { display:flex; align-items:center; justify-content:center; gap:.5rem; }
   </style>
+  <script src="https://unpkg.com/animejs@3.2.1/lib/anime.min.js"></script>
 </head>
 <body>
-  <h1>积分后台</h1>
-  <div class="card">
-    <div class="row">
-      <div class="col">
-        <label>管理员 Token</label>
-        <input id="token" placeholder="x-admin-token" />
+  <div class="bg-anim" aria-hidden="true"></div>
+  <!-- Top Navbar -->
+  <nav class="navbar">
+    <div class="wrap container">
+      <div class="brand">⭐ 积分系统</div>
+      <div class="actions">
+        <a href="/" class="pill">前台</a>
+        <span class="pill" aria-current="page">管理后台</span>
       </div>
-      <button id="btn-refresh">刷新奖励</button>
     </div>
-  </div>
+  </nav>
+  <main class="container">
+    <header class="stack">
+      <h1>积分后台</h1>
+      <article>
+        <div class="grid" style="align-items:end;">
+          <label>
+            管理员 Token
+            <input id="token" placeholder="x-admin-token" />
+          </label>
+          <div>
+            <button id="btn-refresh" class="secondary">刷新奖励</button>
+          </div>
+        </div>
+      </article>
+    </header>
 
-  <div class="card">
-    <h3>创建/更新/删除 奖励</h3>
-    <div class="row">
-      <input id="rw-id" placeholder="ID(更新/删除用)" />
-      <input id="rw-name" placeholder="名称" />
-      <input id="rw-cost" type="number" placeholder="消耗积分" />
-      <input id="rw-stock" type="number" placeholder="库存(留空为无限)" />
-      <input id="rw-desc" placeholder="描述" />
-      <label><input type="checkbox" id="rw-enabled" checked /> 启用</label>
-    </div>
-    <div class="row">
-      <button onclick="createReward()">创建</button>
-      <button onclick="updateReward()">更新</button>
-      <button onclick="deleteReward()">删除</button>
-    </div>
-  </div>
+    <section class="stack">
+      <article class="stack">
+        <h3>创建 / 更新 / 删除 奖励</h3>
+        <div class="grid">
+          <input id="rw-id" placeholder="ID（更新/删除用）" />
+          <input id="rw-name" placeholder="名称" />
+          <input id="rw-cost" type="number" placeholder="消耗积分" />
+          <input id="rw-stock" type="number" placeholder="库存（留空为无限）" />
+          <input id="rw-desc" placeholder="描述" />
+          <label class="muted"><input type="checkbox" id="rw-enabled" checked /> 启用</label>
+        </div>
+        <div class="grid" style="grid-template-columns:repeat(auto-fit, minmax(120px, 1fr));">
+          <button onclick="createReward()" class="contrast">创建</button>
+          <button onclick="updateReward()">更新</button>
+          <button onclick="deleteReward()" class="secondary">删除</button>
+        </div>
+      </article>
 
-  <div class="card">
-    <h3>奖励列表</h3>
-    <div id="rewards"></div>
-  </div>
+      <article class="stack">
+        <h3>奖励列表</h3>
+        <div id="rewards" class="stack"></div>
+      </article>
 
-  <div class="card">
-    <h3>用户积分调整</h3>
-    <div class="row">
-      <input id="u-name" placeholder="用户名" />
-      <input id="u-delta" type="number" placeholder="增减分（可负数）" />
-      <input id="u-reason" placeholder="原因(可选)" />
-      <button onclick="adjust()">提交</button>
+      <article class="stack">
+        <h3>用户积分调整</h3>
+        <div class="grid" style="align-items:end;">
+          <input id="u-name" placeholder="用户名" />
+          <input id="u-delta" type="number" placeholder="增减分（可负数）" />
+          <input id="u-reason" placeholder="原因（可选）" />
+          <button onclick="adjust()">提交</button>
+        </div>
+      </article>
+    </section>
+  </main>
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="wrap">
+      <span>⭐ 积分系统 · 后台管理</span>
     </div>
-  </div>
+  </footer>
 
   <script>
     const $ = (id) => document.getElementById(id);
     const hdr = () => ({ 'content-type':'application/json', 'x-admin-token': $("token").value.trim() });
+
+    // anime.js particle burst
+    function burstAt(x, y) {
+      const particles = Array.from({ length: 18 }).map(() => {
+        const d = document.createElement('div');
+        d.style.position = 'fixed'; d.style.left = x + 'px'; d.style.top = y + 'px';
+        d.style.width = d.style.height = Math.random() > .5 ? '4px' : '6px'; d.style.borderRadius='50%';
+        d.style.background = Math.random() > .5 ? 'var(--neon)' : 'var(--neon2)'; d.style.pointerEvents='none';
+        document.body.appendChild(d); return d;
+      });
+      anime.timeline({ easing:'easeOutExpo', duration:900, complete:()=>particles.forEach(p=>p.remove()) })
+        .add({ targets: particles, translateX:()=>anime.random(-120,120), translateY:()=>anime.random(-120,120), scale:()=>anime.random(8,12)/10, opacity:[{value:1,duration:80},{value:0,duration:520,delay:280}] });
+    }
 
     async function listRewards() {
       const r = await fetch('/api/admin/rewards', { headers: hdr() });
       if (r.status === 401) { $("rewards").innerHTML = '未授权'; return; }
       const data = await r.json();
       $("rewards").innerHTML = (data.rewards||[]).map(rw => `
-        <div class="row" style="border-bottom:1px solid #eee; padding:6px 0;">
-          <div class="col"><b>#${rw.id} ${rw.name}</b><div style="color:#666; font-size:12px;">${rw.description || ''}</div></div>
-          <div>消耗：${rw.cost_points}</div>
+        <article class="grid" style="align-items:center; grid-template-columns: 1fr auto auto auto;">
+          <div>
+            <strong>#${rw.id} ${rw.name}</strong>
+            <div class="muted">${rw.description || ''}</div>
+          </div>
+          <div>消耗：<b>${rw.cost_points}</b></div>
           <div>${rw.stock === null ? '' : '库存：' + rw.stock}</div>
           <div>${rw.enabled ? '启用' : '停用'}</div>
-        </div>
+        </article>
       `).join('');
     }
 
-    $("btn-refresh").onclick = listRewards;
+    $("btn-refresh").onclick = (e) => { listRewards(); const r = e.target.getBoundingClientRect(); burstAt(r.left + r.width/2, r.top + r.height/2); };
 
-    window.createReward = async () => {
+    window.createReward = async (ev) => {
       const name = $("rw-name").value.trim();
       const cost = Number($("rw-cost").value);
       const stockVal = $("rw-stock").value.trim();
@@ -87,9 +148,10 @@
       const d = await r.json();
       alert(JSON.stringify(d));
       await listRewards();
+      if (ev?.target) { const b = ev.target.getBoundingClientRect(); burstAt(b.left + b.width/2, b.top + b.height/2); }
     };
 
-    window.updateReward = async () => {
+    window.updateReward = async (ev) => {
       const id = Number($("rw-id").value);
       const name = $("rw-name").value.trim() || undefined;
       const cost = $("rw-cost").value === '' ? undefined : Number($("rw-cost").value);
@@ -101,23 +163,26 @@
       const d = await r.json();
       alert(JSON.stringify(d));
       await listRewards();
+      if (ev?.target) { const b = ev.target.getBoundingClientRect(); burstAt(b.left + b.width/2, b.top + b.height/2); }
     };
 
-    window.deleteReward = async () => {
+    window.deleteReward = async (ev) => {
       const id = Number($("rw-id").value);
       const r = await fetch('/api/admin/rewards', { method:'POST', headers: hdr(), body: JSON.stringify({ action:'delete', id }) });
       const d = await r.json();
       alert(JSON.stringify(d));
       await listRewards();
+      if (ev?.target) { const b = ev.target.getBoundingClientRect(); burstAt(b.left + b.width/2, b.top + b.height/2); }
     };
 
-    window.adjust = async () => {
+    window.adjust = async (ev) => {
       const username = $("u-name").value.trim();
       const delta = Number($("u-delta").value);
       const reason = $("u-reason").value.trim();
       const r = await fetch('/api/admin/points', { method:'POST', headers: hdr(), body: JSON.stringify({ username, delta, reason: reason || undefined }) });
       const d = await r.json();
       alert(JSON.stringify(d));
+      if (ev?.target) { const b = ev.target.getBoundingClientRect(); burstAt(b.left + b.width/2, b.top + b.height/2); }
     };
   </script>
 </body>
