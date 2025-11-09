@@ -5,6 +5,8 @@ import { cors } from 'hono/cors'
 type Env = {
   DB: D1Database
   ADMIN_TOKEN: string
+  ADMIN_USER?: string
+  ADMIN_PASS?: string
 }
 
 const app = new Hono<{ Bindings: Env }>()
@@ -24,12 +26,25 @@ async function getOrCreateUser(c: Context<{ Bindings: Env }>, username: string) 
   return id
 }
 
-function requireAdmin(c: Context<{ Bindings: Env }>) {
-  const token = c.req.header('x-admin-token') || ''
-  if (!token || token !== c.env.ADMIN_TOKEN) {
-    return c.json({ error: 'unauthorized' }, 401)
+function getCookie(c: Context, name: string): string | null {
+  const cookie = c.req.header('cookie') || ''
+  for (const part of cookie.split(';')) {
+    const [k, v] = part.trim().split('=')
+    if (k === name) return decodeURIComponent(v || '')
   }
   return null
+}
+
+function requireAdmin(c: Context<{ Bindings: Env }>) {
+  const token = c.req.header('x-admin-token') || ''
+  const cookieToken = getCookie(c as any, 'admin_token') || ''
+  if (token === c.env.ADMIN_TOKEN || cookieToken === c.env.ADMIN_TOKEN) {
+    return null
+  }
+  if (!token && !cookieToken) {
+    return c.json({ error: 'unauthorized' }, 401)
+  }
+  return c.json({ error: 'unauthorized' }, 401)
 }
 
 app.post('/api/user/init', async (c: Context<{ Bindings: Env }>) => {
@@ -37,9 +52,16 @@ app.post('/api/user/init', async (c: Context<{ Bindings: Env }>) => {
   if (!username) return c.json({ error: 'username_required' }, 400)
   const userId = await getOrCreateUser(c, username)
   const balance = await c.env.DB.prepare('SELECT points FROM balances WHERE user_id = ?').bind(userId).first<{ points: number }>()
+  const sumRow = await c.env.DB.prepare('SELECT COALESCE(SUM(points), 0) AS s FROM events WHERE user_id = ?').bind(userId).first<{ s: number }>()
+  const pointsNow = balance?.points ?? 0
+  const sumPoints = sumRow?.s ?? 0
+  if (pointsNow !== sumPoints) {
+    await c.env.DB.prepare('INSERT OR IGNORE INTO balances (user_id, points) VALUES (?, 0)').bind(userId).run()
+    await c.env.DB.prepare('UPDATE balances SET points = ? WHERE user_id = ?').bind(sumPoints, userId).run()
+  }
   const events = await c.env.DB.prepare('SELECT id, title, points, created_at FROM events WHERE user_id = ? ORDER BY id DESC LIMIT 100').bind(userId).all()
   const rewards = await c.env.DB.prepare('SELECT id, name, cost_points, stock, description FROM rewards WHERE enabled = 1 ORDER BY id DESC').all()
-  return c.json({ userId, username, balance: balance?.points ?? 0, events: events.results, rewards: rewards.results })
+  return c.json({ userId, username, balance: sumPoints, events: events.results, rewards: rewards.results })
 })
 
 app.post('/api/events', async (c: Context<{ Bindings: Env }>) => {
@@ -58,9 +80,16 @@ app.get('/api/overview', async (c: Context<{ Bindings: Env }>) => {
   const user = await c.env.DB.prepare('SELECT id FROM users WHERE username = ?').bind(username).first<{ id: number }>()
   if (!user) return c.json({ balance: 0, events: [], rewards: [] })
   const balance = await c.env.DB.prepare('SELECT points FROM balances WHERE user_id = ?').bind(user.id).first<{ points: number }>()
+  const sumRow = await c.env.DB.prepare('SELECT COALESCE(SUM(points), 0) AS s FROM events WHERE user_id = ?').bind(user.id).first<{ s: number }>()
+  const pointsNow = balance?.points ?? 0
+  const sumPoints = sumRow?.s ?? 0
+  if (pointsNow !== sumPoints) {
+    await c.env.DB.prepare('INSERT OR IGNORE INTO balances (user_id, points) VALUES (?, 0)').bind(user.id).run()
+    await c.env.DB.prepare('UPDATE balances SET points = ? WHERE user_id = ?').bind(sumPoints, user.id).run()
+  }
   const events = await c.env.DB.prepare('SELECT id, title, points, created_at FROM events WHERE user_id = ? ORDER BY id DESC LIMIT 100').bind(user.id).all()
   const rewards = await c.env.DB.prepare('SELECT id, name, cost_points, stock, description FROM rewards WHERE enabled = 1 ORDER BY id DESC').all()
-  return c.json({ balance: balance?.points ?? 0, events: events.results, rewards: rewards.results })
+  return c.json({ balance: sumPoints, events: events.results, rewards: rewards.results })
 })
 
 app.post('/api/redeem', async (c: Context<{ Bindings: Env }>) => {
@@ -134,21 +163,69 @@ app.delete('/api/admin/events/:id', async (c: Context<{ Bindings: Env }>) => {
   return c.json({ ok: true })
 })
 
+// Rewards list with pagination & search
 app.get('/api/admin/rewards', async (c: Context<{ Bindings: Env }>) => {
   const unauth = requireAdmin(c)
   if (unauth) return unauth
-  const rewards = await c.env.DB.prepare('SELECT id, name, cost_points, stock, description, enabled FROM rewards ORDER BY id DESC').all()
-  return c.json({ rewards: rewards.results })
+  const page = Math.max(1, Number(c.req.query('page') || '1'))
+  const size = Math.min(100, Math.max(1, Number(c.req.query('size') || '20')))
+  const keyword = (c.req.query('keyword') || '').trim()
+  let where = ''
+  let binds: any[] = []
+  if (keyword) { where = 'WHERE name LIKE ? OR description LIKE ?'; binds.push(`%${keyword}%`, `%${keyword}%`) }
+  const totalRow = await c.env.DB.prepare(`SELECT COUNT(1) AS n FROM rewards ${where}`).bind(...binds).first<{ n: number }>()
+  binds.push(size, (page - 1) * size)
+  const rows = await c.env.DB.prepare(`SELECT id, name, cost_points, stock, description, enabled FROM rewards ${where} ORDER BY id DESC LIMIT ? OFFSET ?`).bind(...binds).all()
+  return c.json({ items: rows.results, total: totalRow?.n ?? 0, page, size, rewards: rows.results })
 })
 
 // List users with their current points
 app.get('/api/admin/users', async (c: Context<{ Bindings: Env }>) => {
   const unauth = requireAdmin(c)
   if (unauth) return unauth
+  const page = Math.max(1, Number(c.req.query('page') || '1'))
+  const size = Math.min(100, Math.max(1, Number(c.req.query('size') || '20')))
+  const keyword = (c.req.query('keyword') || '').trim()
+  let where = ''
+  let binds: any[] = []
+  if (keyword) { where = 'WHERE u.username LIKE ?'; binds.push(`%${keyword}%`) }
+  const totalRow = await c.env.DB.prepare(`SELECT COUNT(1) AS n FROM users u ${where}`).bind(...binds).first<{ n: number }>()
+  binds.push(size, (page - 1) * size)
   const users = await c.env.DB
-    .prepare('SELECT u.id, u.username, COALESCE(b.points, 0) AS points, u.created_at FROM users u LEFT JOIN balances b ON b.user_id = u.id ORDER BY u.id DESC LIMIT 1000')
+    .prepare(`SELECT u.id, u.username, COALESCE(b.points, 0) AS points, u.created_at FROM users u LEFT JOIN balances b ON b.user_id = u.id ${where} ORDER BY u.id DESC LIMIT ? OFFSET ?`)
+    .bind(...binds)
     .all()
-  return c.json({ users: users.results })
+  return c.json({ items: users.results, total: totalRow?.n ?? 0, page, size, users: users.results })
+})
+
+// CSV export endpoints
+app.get('/api/admin/export/:kind', async (c: Context<{ Bindings: Env }>) => {
+  const unauth = requireAdmin(c)
+  if (unauth) return unauth
+  const kind = c.req.param('kind')
+  let header = ''
+  let rows: any[] = []
+  if (kind === 'users') {
+    header = 'id,username,points,created_at\n'
+    const r = await c.env.DB
+      .prepare('SELECT u.id, u.username, COALESCE(b.points,0) AS points, u.created_at FROM users u LEFT JOIN balances b ON b.user_id=u.id ORDER BY u.id DESC')
+      .all()
+    rows = r.results as any[]
+  } else if (kind === 'rewards') {
+    header = 'id,name,cost_points,stock,enabled,description\n'
+    const r = await c.env.DB.prepare('SELECT id,name,cost_points,stock,enabled,description FROM rewards ORDER BY id DESC').all()
+    rows = r.results as any[]
+  } else if (kind === 'events') {
+    header = 'id,user_id,title,points,created_at\n'
+    const r = await c.env.DB.prepare('SELECT id,user_id,title,points,created_at FROM events ORDER BY id DESC LIMIT 5000').all()
+    rows = r.results as any[]
+  } else {
+    return c.json({ error: 'unknown_kind' }, 400)
+  }
+  const csv = header + rows.map((o) => Object.values(o).map(v => String(v).replaceAll('"','""')).map(v => /[,"]/.test(v) ? `"${v}"` : v).join(',')).join('\n')
+  c.header('Content-Type', 'text/csv; charset=utf-8')
+  c.header('Cache-Control', 'no-store')
+  return c.body(csv)
 })
 
 export default app

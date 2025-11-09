@@ -35,6 +35,7 @@
 </head>
 <body>
   <div class="bg-anim" aria-hidden="true"></div>
+  <div id="toast" style="position:fixed; right:16px; top:16px; z-index:50; display:grid; gap:.5rem;"></div>
   <!-- Top Navbar -->
   <nav class="navbar">
     <div class="wrap container">
@@ -42,6 +43,8 @@
       <div class="actions">
         <a href="/" class="pill">前台</a>
         <span class="pill" aria-current="page">管理后台</span>
+        <a href="/admin-login.html" class="pill">登录</a>
+        <button id="btn-logout" class="pill" style="border:none; cursor:pointer;">退出</button>
       </div>
     </div>
   </nav>
@@ -81,7 +84,28 @@
 
       <article class="stack">
         <h3>奖励列表</h3>
+        <div class="grid" style="align-items:end; grid-template-columns: 1fr auto auto auto;">
+          <input id="rw-search" placeholder="搜索奖励名称/描述" />
+          <div>
+            <button id="rw-export" class="secondary">导出CSV</button>
+          </div>
+          <div class="muted" id="rw-summary"></div>
+          <div class="muted" id="rw-pages"></div>
+        </div>
         <div id="rewards" class="stack"></div>
+      </article>
+
+      <article class="stack">
+        <h3>用户列表</h3>
+        <div class="grid" style="align-items:end; grid-template-columns: 1fr auto auto auto;">
+          <input id="u-search" placeholder="搜索用户名" />
+          <div>
+            <button id="u-export" class="secondary">导出CSV</button>
+          </div>
+          <div class="muted" id="u-summary"></div>
+          <div class="muted" id="u-pages"></div>
+        </div>
+        <div id="users" class="stack"></div>
       </article>
 
       <article class="stack">
@@ -105,6 +129,25 @@
   <script>
     const $ = (id) => document.getElementById(id);
     const hdr = () => ({ 'content-type':'application/json', 'x-admin-token': $("token").value.trim() });
+    // pagination state
+    const state = {
+      rPage: 1, rSize: 10, rKeyword: '', rTotal: 0,
+      uPage: 1, uSize: 10, uKeyword: '', uTotal: 0
+    }
+
+    // cute toast
+    function notify(text, kind = 'info') {
+      const el = document.createElement('div');
+      el.textContent = text;
+      el.style.padding = '.6rem .9rem';
+      el.style.borderRadius = '12px';
+      el.style.fontWeight = '600';
+      el.style.color = kind === 'error' ? '#fff' : '#064e3b';
+      el.style.background = kind === 'error' ? '#ef4444' : '#a7f3d0';
+      el.style.boxShadow = '0 10px 20px rgba(0,0,0,.12)';
+      $("toast").appendChild(el);
+      setTimeout(() => el.remove(), 3600);
+    }
 
     // anime.js particle burst
     function burstAt(x, y) {
@@ -120,10 +163,14 @@
     }
 
     async function listRewards() {
-      const r = await fetch('/api/admin/rewards', { headers: hdr() });
-      if (r.status === 401) { $("rewards").innerHTML = '未授权'; return; }
+      const qp = new URLSearchParams({ page: String(state.rPage), size: String(state.rSize), keyword: state.rKeyword });
+      const r = await fetch('/api/admin/rewards?' + qp.toString(), { headers: hdr() });
+      if (r.status === 401) { $("rewards").innerHTML = '未授权'; notify('未授权，请检查管理员 Token','error'); return; }
       const data = await r.json();
-      $("rewards").innerHTML = (data.rewards||[]).map(rw => `
+      state.rTotal = data.total || (data.items||[]).length;
+      $("rw-summary").textContent = `共 ${state.rTotal} 条`;
+      $("rw-pages").innerHTML = pagebar(state.rPage, state.rSize, state.rTotal, (p)=>{ state.rPage=p; listRewards(); });
+      $("rewards").innerHTML = (data.items||data.rewards||[]).map(rw => `
         <article class="grid" style="align-items:center; grid-template-columns: 1fr auto auto auto;">
           <div>
             <strong>#${rw.id} ${rw.name}</strong>
@@ -136,7 +183,40 @@
       `).join('');
     }
 
-    $("btn-refresh").onclick = (e) => { listRewards(); const r = e.target.getBoundingClientRect(); burstAt(r.left + r.width/2, r.top + r.height/2); };
+    async function listUsers() {
+      const qp = new URLSearchParams({ page: String(state.uPage), size: String(state.uSize), keyword: state.uKeyword });
+      const r = await fetch('/api/admin/users?' + qp.toString(), { headers: hdr() });
+      if (r.status === 401) { $("users").innerHTML = '未授权'; return; }
+      const data = await r.json();
+      state.uTotal = data.total || (data.items||[]).length;
+      $("u-summary").textContent = `共 ${state.uTotal} 条`;
+      $("u-pages").innerHTML = pagebar(state.uPage, state.uSize, state.uTotal, (p)=>{ state.uPage=p; listUsers(); });
+      $("users").innerHTML = (data.items||data.users||[]).map(u => `
+        <article class="grid user-row" id="user-${u.id}" style="grid-template-columns: 1fr auto; align-items:center;">
+          <div><strong>#${u.id}</strong> ${u.username} <span class="muted">[${u.created_at}]</span></div>
+          <div><b>${u.points}</b></div>
+        </article>
+      `).join('');
+    }
+
+    $("btn-refresh").onclick = async (e) => { await listRewards(); await listUsers(); notify('已刷新'); const r = e.target.getBoundingClientRect(); burstAt(r.left + r.width/2, r.top + r.height/2); };
+
+    // persist token
+    (function initToken(){
+      const saved = localStorage.getItem('admin_token');
+      if (saved) { $("token").value = saved; }
+      if ($("token").value.trim()) { listRewards(); listUsers(); }
+      $("token").addEventListener('input', () => {
+        localStorage.setItem('admin_token', $("token").value.trim());
+      });
+    })();
+
+    // search and export
+    $("rw-search").addEventListener('input', () => { state.rKeyword = $("rw-search").value.trim(); state.rPage = 1; listRewards(); });
+    $("u-search").addEventListener('input', () => { state.uKeyword = $("u-search").value.trim(); state.uPage = 1; listUsers(); });
+    $("rw-export").onclick = async ()=> downloadCSV('/api/admin/export/rewards');
+    $("u-export").onclick = async ()=> downloadCSV('/api/admin/export/users');
+    $("btn-logout").onclick = async ()=> { await fetch('/api/admin/logout', { method:'POST', headers: hdr() }); notify('已退出'); };
 
     window.createReward = async (ev) => {
       const name = $("rw-name").value.trim();
@@ -146,8 +226,8 @@
       const description = $("rw-desc").value.trim();
       const r = await fetch('/api/admin/rewards', { method:'POST', headers: hdr(), body: JSON.stringify({ action:'create', name, cost_points: cost, stock, description }) });
       const d = await r.json();
-      alert(JSON.stringify(d));
-      await listRewards();
+      if (r.ok && d.ok) { notify('奖励已创建'); } else { notify('创建失败','error'); }
+      await listRewards(); await listUsers();
       if (ev?.target) { const b = ev.target.getBoundingClientRect(); burstAt(b.left + b.width/2, b.top + b.height/2); }
     };
 
@@ -161,8 +241,8 @@
       const enabled = $("rw-enabled").checked;
       const r = await fetch('/api/admin/rewards', { method:'POST', headers: hdr(), body: JSON.stringify({ action:'update', id, name, cost_points: cost, stock, description, enabled }) });
       const d = await r.json();
-      alert(JSON.stringify(d));
-      await listRewards();
+      if (r.ok && d.ok) { notify('奖励已更新'); } else { notify('更新失败','error'); }
+      await listRewards(); await listUsers();
       if (ev?.target) { const b = ev.target.getBoundingClientRect(); burstAt(b.left + b.width/2, b.top + b.height/2); }
     };
 
@@ -170,8 +250,8 @@
       const id = Number($("rw-id").value);
       const r = await fetch('/api/admin/rewards', { method:'POST', headers: hdr(), body: JSON.stringify({ action:'delete', id }) });
       const d = await r.json();
-      alert(JSON.stringify(d));
-      await listRewards();
+      if (r.ok && d.ok) { notify('奖励已删除'); } else { notify('删除失败','error'); }
+      await listRewards(); await listUsers();
       if (ev?.target) { const b = ev.target.getBoundingClientRect(); burstAt(b.left + b.width/2, b.top + b.height/2); }
     };
 
@@ -181,9 +261,48 @@
       const reason = $("u-reason").value.trim();
       const r = await fetch('/api/admin/points', { method:'POST', headers: hdr(), body: JSON.stringify({ username, delta, reason: reason || undefined }) });
       const d = await r.json();
-      alert(JSON.stringify(d));
+      if (r.ok && d.ok) { notify('积分已调整'); } else { notify('调整失败','error'); }
+      await listRewards(); await listUsers();
+      // highlight the affected user row
+      setTimeout(() => {
+        const el = document.querySelector(`[id^="user-"]`);
+        const target = Array.from(document.querySelectorAll('.user-row')).find(x=> x.textContent.includes(username));
+        if (target) {
+          target.animate([
+            { transform:'scale(1)', boxShadow:'none' },
+            { transform:'scale(1.02)', boxShadow:'0 0 0 3px rgba(34,211,238,.35)' },
+            { transform:'scale(1)', boxShadow:'none' }
+          ], { duration: 900, easing: 'ease-out' });
+        }
+      }, 100);
       if (ev?.target) { const b = ev.target.getBoundingClientRect(); burstAt(b.left + b.width/2, b.top + b.height/2); }
     };
+
+    function pagebar(page, size, total, onGo){
+      const pages = Math.max(1, Math.ceil(total / size));
+      const prev = `<button class="secondary" ${page<=1?'disabled':''} data-go="${page-1}">上一页</button>`;
+      const next = `<button class="secondary" ${page>=pages?'disabled':''} data-go="${page+1}">下一页</button>`;
+      const info = `<span class="muted">第 ${page}/${pages} 页</span>`;
+      const html = `${prev} ${info} ${next}`;
+      const div = document.createElement('div');
+      div.innerHTML = html;
+      div.querySelectorAll('button[data-go]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{ const p = Number(btn.getAttribute('data-go')); if(p>=1 && p<=pages) onGo(p); });
+      });
+      return div.innerHTML;
+    }
+
+    async function downloadCSV(url){
+      const r = await fetch(url, { headers: hdr() });
+      if(!r.ok){ notify('导出失败','error'); return; }
+      const blob = await r.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = url.split('/').pop() + '.csv';
+      a.click();
+      URL.revokeObjectURL(a.href);
+      notify('导出开始');
+    }
   </script>
 </body>
 </html>
