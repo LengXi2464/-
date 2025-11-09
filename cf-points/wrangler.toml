@@ -8,5 +8,5 @@ ADMIN_TOKEN = "dev-admin" # local dev token; production use `wrangler secret put
 
 [[d1_databases]]
 binding = "DB"
-database_name = "cf-points-db"
-database_id = ""
+database_name = "jifen"
+database_id = "c31c07d8-9d59-4d79-abed-4b2755c18f9e"
