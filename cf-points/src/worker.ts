@@ -13,7 +13,11 @@ app.use('*', cors())
 async function getOrCreateUser(c: Context<{ Bindings: Env }>, username: string) {
   const db = c.env.DB
   const u = await db.prepare('SELECT id FROM users WHERE username = ?').bind(username).first<{ id: number }>()
-  if (u) return u.id
+  if (u) {
+    // make sure balances row exists for legacy users
+    await db.prepare('INSERT OR IGNORE INTO balances (user_id, points) VALUES (?, 0)').bind(u.id).run()
+    return u.id
+  }
   const res = await db.prepare('INSERT INTO users (username) VALUES (?)').bind(username).run()
   const id = res.lastInsertRowId as number
   await db.prepare('INSERT INTO balances (user_id, points) VALUES (?, 0)').bind(id).run()
@@ -135,6 +139,16 @@ app.get('/api/admin/rewards', async (c: Context<{ Bindings: Env }>) => {
   if (unauth) return unauth
   const rewards = await c.env.DB.prepare('SELECT id, name, cost_points, stock, description, enabled FROM rewards ORDER BY id DESC').all()
   return c.json({ rewards: rewards.results })
+})
+
+// List users with their current points
+app.get('/api/admin/users', async (c: Context<{ Bindings: Env }>) => {
+  const unauth = requireAdmin(c)
+  if (unauth) return unauth
+  const users = await c.env.DB
+    .prepare('SELECT u.id, u.username, COALESCE(b.points, 0) AS points, u.created_at FROM users u LEFT JOIN balances b ON b.user_id = u.id ORDER BY u.id DESC LIMIT 1000')
+    .all()
+  return c.json({ users: users.results })
 })
 
 export default app
