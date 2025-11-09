@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>积分后台</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 20px auto; padding: 0 12px; }
+    h1 { font-size: 20px; }
+    input, button { padding: 8px; margin: 4px 0; }
+    .card { border: 1px solid #ddd; padding: 12px; margin: 12px 0; border-radius: 8px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .col { flex: 1; min-width: 220px; }
+  </style>
+</head>
+<body>
+  <h1>积分后台</h1>
+  <div class="card">
+    <div class="row">
+      <div class="col">
+        <label>管理员 Token</label>
+        <input id="token" placeholder="x-admin-token" />
+      </div>
+      <button id="btn-refresh">刷新奖励</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>创建/更新/删除 奖励</h3>
+    <div class="row">
+      <input id="rw-id" placeholder="ID(更新/删除用)" />
+      <input id="rw-name" placeholder="名称" />
+      <input id="rw-cost" type="number" placeholder="消耗积分" />
+      <input id="rw-stock" type="number" placeholder="库存(留空为无限)" />
+      <input id="rw-desc" placeholder="描述" />
+      <label><input type="checkbox" id="rw-enabled" checked /> 启用</label>
+    </div>
+    <div class="row">
+      <button onclick="createReward()">创建</button>
+      <button onclick="updateReward()">更新</button>
+      <button onclick="deleteReward()">删除</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>奖励列表</h3>
+    <div id="rewards"></div>
+  </div>
+
+  <div class="card">
+    <h3>用户积分调整</h3>
+    <div class="row">
+      <input id="u-name" placeholder="用户名" />
+      <input id="u-delta" type="number" placeholder="增减分（可负数）" />
+      <input id="u-reason" placeholder="原因(可选)" />
+      <button onclick="adjust()">提交</button>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const hdr = () => ({ 'content-type':'application/json', 'x-admin-token': $("token").value.trim() });
+
+    async function listRewards() {
+      const r = await fetch('/api/admin/rewards', { headers: hdr() });
+      if (r.status === 401) { $("rewards").innerHTML = '未授权'; return; }
+      const data = await r.json();
+      $("rewards").innerHTML = (data.rewards||[]).map(rw => `
+        <div class="row" style="border-bottom:1px solid #eee; padding:6px 0;">
+          <div class="col"><b>#${rw.id} ${rw.name}</b><div style="color:#666; font-size:12px;">${rw.description || ''}</div></div>
+          <div>消耗：${rw.cost_points}</div>
+          <div>${rw.stock === null ? '' : '库存：' + rw.stock}</div>
+          <div>${rw.enabled ? '启用' : '停用'}</div>
+        </div>
+      `).join('');
+    }
+
+    $("btn-refresh").onclick = listRewards;
+
+    window.createReward = async () => {
+      const name = $("rw-name").value.trim();
+      const cost = Number($("rw-cost").value);
+      const stockVal = $("rw-stock").value.trim();
+      const stock = stockVal === '' ? null : Number(stockVal);
+      const description = $("rw-desc").value.trim();
+      const r = await fetch('/api/admin/rewards', { method:'POST', headers: hdr(), body: JSON.stringify({ action:'create', name, cost_points: cost, stock, description }) });
+      const d = await r.json();
+      alert(JSON.stringify(d));
+      await listRewards();
+    };
+
+    window.updateReward = async () => {
+      const id = Number($("rw-id").value);
+      const name = $("rw-name").value.trim() || undefined;
+      const cost = $("rw-cost").value === '' ? undefined : Number($("rw-cost").value);
+      const stockVal = $("rw-stock").value.trim();
+      const stock = stockVal === '' ? undefined : Number(stockVal);
+      const description = $("rw-desc").value.trim() || undefined;
+      const enabled = $("rw-enabled").checked;
+      const r = await fetch('/api/admin/rewards', { method:'POST', headers: hdr(), body: JSON.stringify({ action:'update', id, name, cost_points: cost, stock, description, enabled }) });
+      const d = await r.json();
+      alert(JSON.stringify(d));
+      await listRewards();
+    };
+
+    window.deleteReward = async () => {
+      const id = Number($("rw-id").value);
+      const r = await fetch('/api/admin/rewards', { method:'POST', headers: hdr(), body: JSON.stringify({ action:'delete', id }) });
+      const d = await r.json();
+      alert(JSON.stringify(d));
+      await listRewards();
+    };
+
+    window.adjust = async () => {
+      const username = $("u-name").value.trim();
+      const delta = Number($("u-delta").value);
+      const reason = $("u-reason").value.trim();
+      const r = await fetch('/api/admin/points', { method:'POST', headers: hdr(), body: JSON.stringify({ username, delta, reason: reason || undefined }) });
+      const d = await r.json();
+      alert(JSON.stringify(d));
+    };
+  </script>
+</body>
+</html>

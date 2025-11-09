@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>积分前台</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 20px auto; padding: 0 12px; }
+    h1 { font-size: 20px; }
+    input, button, select { padding: 8px; margin: 4px 0; }
+    .card { border: 1px solid #ddd; padding: 12px; margin: 12px 0; border-radius: 8px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .col { flex: 1; min-width: 240px; }
+    ul { padding-left: 16px; }
+  </style>
+</head>
+<body>
+  <h1>积分前台</h1>
+  <div class="card">
+    <div class="row">
+      <div class="col">
+        <label>用户名</label>
+        <input id="username" placeholder="输入用户名" />
+      </div>
+      <div class="col">
+        <button id="btn-init">进入/同步</button>
+      </div>
+    </div>
+    <div>当前积分：<b id="balance">0</b></div>
+  </div>
+
+  <div class="card">
+    <h3>添加事件加分</h3>
+    <input id="title" placeholder="事件描述" />
+    <input id="points" type="number" placeholder="分值（可正可负）" />
+    <button id="btn-add">提交</button>
+  </div>
+
+  <div class="card">
+    <h3>可兑换奖励</h3>
+    <div id="rewards"></div>
+  </div>
+
+  <div class="card">
+    <h3>我的事件</h3>
+    <ul id="events"></ul>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let currentUser = '';
+
+    async function refresh() {
+      if (!currentUser) return;
+      const r = await fetch(`/api/overview?username=${encodeURIComponent(currentUser)}`);
+      const data = await r.json();
+      $("balance").textContent = data.balance ?? 0;
+      const ev = data.events || [];
+      $("events").innerHTML = ev.map(e => `<li>#${e.id} [${e.created_at}] ${e.title} (${e.points > 0 ? '+' : ''}${e.points})</li>`).join('');
+      const rewards = data.rewards || [];
+      $("rewards").innerHTML = rewards.length ? rewards.map(rw => `
+        <div class="row" style="align-items:center; border-bottom:1px solid #eee; padding:6px 0;">
+          <div class="col"><b>${rw.name}</b><div style="color:#666; font-size:12px;">${rw.description || ''}</div></div>
+          <div>消耗：${rw.cost_points}</div>
+          <div>${rw.stock === null ? '' : '库存：' + rw.stock}</div>
+          <div><button onclick="redeem(${rw.id})">兑换</button></div>
+        </div>
+      `).join('') : '<div>暂无奖励</div>';
+    }
+
+    $("btn-init").onclick = async () => {
+      currentUser = $("username").value.trim();
+      if (!currentUser) return alert('请输入用户名');
+      const r = await fetch('/api/user/init', { method: 'POST', headers: { 'content-type':'application/json' }, body: JSON.stringify({ username: currentUser }) });
+      const data = await r.json();
+      $("balance").textContent = data.balance ?? 0;
+      $("events").innerHTML = (data.events||[]).map(e => `<li>#${e.id} [${e.created_at}] ${e.title} (${e.points > 0 ? '+' : ''}${e.points})</li>`).join('');
+      const rewards = data.rewards || [];
+      $("rewards").innerHTML = rewards.length ? rewards.map(rw => `
+        <div class="row" style="align-items:center; border-bottom:1px solid #eee; padding:6px 0;">
+          <div class="col"><b>${rw.name}</b><div style="color:#666; font-size:12px;">${rw.description || ''}</div></div>
+          <div>消耗：${rw.cost_points}</div>
+          <div>${rw.stock === null ? '' : '库存：' + rw.stock}</div>
+          <div><button onclick="redeem(${rw.id})">兑换</button></div>
+        </div>
+      `).join('') : '<div>暂无奖励</div>';
+    };
+
+    $("btn-add").onclick = async () => {
+      if (!currentUser) return alert('请先进入/同步');
+      const title = $("title").value.trim();
+      const points = Number($("points").value);
+      if (!title || Number.isNaN(points)) return alert('请填写事件和分值');
+      const r = await fetch('/api/events', { method: 'POST', headers: { 'content-type':'application/json' }, body: JSON.stringify({ username: currentUser, title, points }) });
+      const data = await r.json();
+      if (!data.ok) return alert(JSON.stringify(data));
+      await refresh();
+    };
+
+    window.redeem = async (id) => {
+      if (!currentUser) return alert('请先进入/同步');
+      const r = await fetch('/api/redeem', { method: 'POST', headers: { 'content-type':'application/json' }, body: JSON.stringify({ username: currentUser, reward_id: id }) });
+      const data = await r.json();
+      if (!data.ok) return alert(JSON.stringify(data));
+      await refresh();
+    };
+  </script>
+</body>
+</html>

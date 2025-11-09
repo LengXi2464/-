@@ -1,0 +1,20 @@
+{
+  "name": "cf-points",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrate": "wrangler d1 migrations apply cf-points-db --local && wrangler d1 migrations apply cf-points-db",
+    "db:local": "wrangler d1 execute cf-points-db --local --file=./schema.sql"
+  },
+  "devDependencies": {
+    "wrangler": "^3.80.0",
+    "typescript": "^5.4.0",
+    "@cloudflare/workers-types": "^4.20241022.0"
+  },
+  "dependencies": {
+    "hono": "^4.6.5"
+  }
+}

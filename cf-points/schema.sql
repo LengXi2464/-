@@ -1,0 +1,43 @@
+-- D1 schema
+PRAGMA foreign_keys=ON;
+
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT UNIQUE NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS balances (
+  user_id INTEGER PRIMARY KEY,
+  points INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  points INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS rewards (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  cost_points INTEGER NOT NULL,
+  stock INTEGER,
+  description TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS redemptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  reward_id INTEGER NOT NULL,
+  cost_points INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'approved',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY(reward_id) REFERENCES rewards(id) ON DELETE CASCADE
+);
