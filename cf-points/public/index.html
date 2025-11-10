@@ -166,7 +166,7 @@
           </div>
           <div class="nowrap">消耗：<b>${rw.cost_points}</b></div>
           <div class="nowrap">${rw.stock === null ? '' : '库存：' + rw.stock}</div>
-          <div><button class="secondary" onclick="redeem(${rw.id})">兑换</button></div>
+          <div><button class="secondary redeem-btn" data-redeem="1" data-id="${rw.id}" data-name="${rw.name}">兑换</button></div>
         </article>
       `).join('') : '<div class="muted">暂无奖励</div>';
     }
@@ -201,7 +201,7 @@
             </div>
             <div class="nowrap">消耗：<b>${rw.cost_points}</b></div>
             <div class="nowrap">${rw.stock === null ? '' : '库存：' + rw.stock}</div>
-            <div><button class="secondary" onclick="redeem(${rw.id})">兑换</button></div>
+            <div><button class="secondary redeem-btn" data-redeem="1" data-id="${rw.id}" data-name="${rw.name}">兑换</button></div>
           </article>
         `).join('') : '<div class="muted">暂无奖励</div>';
         notify('同步成功');
@@ -228,17 +228,30 @@
       }
     };
 
-    window.redeem = async (id) => {
+    // event delegation for redeem buttons (more reliable than inline onclick)
+    $("rewards").addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-redeem]');
+      if (!btn) return;
+      const id = Number(btn.getAttribute('data-id'));
+      const name = btn.getAttribute('data-name') || '';
       try {
         if (!currentUser) { notify('请先进入/同步', 'error'); return; }
+        btn.disabled = true; const old = btn.textContent; btn.textContent = '兑换中...';
         const r = await fetch('/api/redeem', { method: 'POST', headers: { 'content-type':'application/json' }, body: JSON.stringify({ username: currentUser, reward_id: id }) });
-        const data = await r.json();
-        if (!r.ok || !data.ok) { notify(data?.error || '兑换失败', 'error'); return; }
-        await refresh();
-        notify('兑换成功');
-        burstAt(window.innerWidth/2, 120);
-      } catch { notify('兑换异常', 'error'); }
-    };
+        const data = await r.json().catch(()=>({}));
+        if (!r.ok || !data.ok) {
+          const map = { insufficient_points: '积分不足', out_of_stock: '库存不足', reward_unavailable: '奖励已下架' };
+          notify(map[data?.error] || '兑换失败', 'error');
+        } else {
+          await refresh();
+          notify(`已兑换：${name}`);
+          burstAt(window.innerWidth/2, 120);
+        }
+        btn.disabled = false; btn.textContent = old;
+      } catch {
+        notify('兑换异常', 'error'); if (btn){ btn.disabled=false; btn.textContent='兑换'; }
+      }
+    });
   </script>
 </body>
 </html>
