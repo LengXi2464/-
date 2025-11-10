@@ -147,18 +147,26 @@
       const data = await r.json();
       $("balance").textContent = data.balance ?? 0;
       const ev = data.events || [];
-      $("events").innerHTML = ev.map(e => `<li>
+      $("events").innerHTML = ev.map(e => {
+        const isRedeem = (e.points < 0) || String(e.title||'').startsWith('兑换：');
+        const badge = isRedeem ? '<span class="badge" style="background:#ef444422;color:#ef4444;border-color:#ef444455;margin-left:.5rem">扣分</span>' : '';
+        return `<li>
         <article class="center" style="justify-content:space-between;">
           <div>
             <span class="muted">#${e.id}</span>
             <span class="muted">[${e.created_at}]</span>
-            <strong>${e.title}</strong>
+            <strong>${e.title}</strong>${badge}
           </div>
           <strong class="nowrap">${e.points > 0 ? '+' : ''}${e.points}</strong>
         </article>
-      </li>`).join('');
+      </li>`;
+      }).join('');
       const rewards = data.rewards || [];
-      $("rewards").innerHTML = rewards.length ? rewards.map(rw => `
+      $("rewards").innerHTML = rewards.length ? rewards.map(rw => {
+        const disabled = (rw.stock === 0);
+        const label = disabled ? '已兑完' : '兑换';
+        const disAttr = disabled ? 'disabled' : '';
+        return `
         <article class="grid" style="align-items:center; grid-template-columns: 1fr auto auto auto;">
           <div>
             <strong>${rw.name}</strong>
@@ -166,9 +174,9 @@
           </div>
           <div class="nowrap">消耗：<b>${rw.cost_points}</b></div>
           <div class="nowrap">${rw.stock === null ? '' : '库存：' + rw.stock}</div>
-          <div><button class="secondary redeem-btn" data-redeem="1" data-id="${rw.id}" data-name="${rw.name}">兑换</button></div>
-        </article>
-      `).join('') : '<div class="muted">暂无奖励</div>';
+          <div><button class="secondary redeem-btn" data-redeem="1" data-id="${rw.id}" data-name="${rw.name}" ${disAttr}>${label}</button></div>
+        </article>`
+      }).join('') : '<div class="muted">暂无奖励</div>';
     }
 
     // scroll to login input
@@ -182,18 +190,26 @@
         if (!r.ok) { notify(`进入/同步失败：${r.status}`, 'error'); return; }
         const data = await r.json();
         $("balance").textContent = data.balance ?? 0;
-        $("events").innerHTML = (data.events||[]).map(e => `<li>
+        $("events").innerHTML = (data.events||[]).map(e => {
+          const isRedeem = (e.points < 0) || String(e.title||'').startsWith('兑换：');
+          const badge = isRedeem ? '<span class="badge" style="background:#ef444422;color:#ef4444;border-color:#ef444455;margin-left:.5rem">扣分</span>' : '';
+          return `<li>
           <article class="center" style="justify-content:space-between;">
             <div>
               <span class="muted">#${e.id}</span>
               <span class="muted">[${e.created_at}]</span>
-              <strong>${e.title}</strong>
+              <strong>${e.title}</strong>${badge}
             </div>
             <strong class="nowrap">${e.points > 0 ? '+' : ''}${e.points}</strong>
           </article>
-        </li>`).join('');
+        </li>`;
+        }).join('');
         const rewards = data.rewards || [];
-        $("rewards").innerHTML = rewards.length ? rewards.map(rw => `
+        $("rewards").innerHTML = rewards.length ? rewards.map(rw => {
+          const disabled = (rw.stock === 0);
+          const label = disabled ? '已兑完' : '兑换';
+          const disAttr = disabled ? 'disabled' : '';
+          return `
           <article class="grid" style="align-items:center; grid-template-columns: 1fr auto auto auto;">
             <div>
               <strong>${rw.name}</strong>
@@ -201,9 +217,9 @@
             </div>
             <div class="nowrap">消耗：<b>${rw.cost_points}</b></div>
             <div class="nowrap">${rw.stock === null ? '' : '库存：' + rw.stock}</div>
-            <div><button class="secondary redeem-btn" data-redeem="1" data-id="${rw.id}" data-name="${rw.name}">兑换</button></div>
-          </article>
-        `).join('') : '<div class="muted">暂无奖励</div>';
+            <div><button class="secondary redeem-btn" data-redeem="1" data-id="${rw.id}" data-name="${rw.name}" ${disAttr}>${label}</button></div>
+          </article>`
+        }).join('') : '<div class="muted">暂无奖励</div>';
         notify('同步成功');
         const rect = e.target.getBoundingClientRect(); burstAt(rect.left + rect.width/2, rect.top + rect.height/2);
       } catch (err) {

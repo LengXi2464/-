@@ -53,18 +53,15 @@ app.post('/api/user/init', async (c: Context<{ Bindings: Env }>) => {
   const userId = await getOrCreateUser(c, username)
   const balance = await c.env.DB.prepare('SELECT points FROM balances WHERE user_id = ?').bind(userId).first<{ points: number }>()
   const sumRow = await c.env.DB.prepare('SELECT COALESCE(SUM(points), 0) AS s FROM events WHERE user_id = ?').bind(userId).first<{ s: number }>()
-  const rsumRow = await c.env.DB.prepare('SELECT COALESCE(SUM(cost_points), 0) AS r FROM redemptions WHERE user_id = ? AND status = "approved"').bind(userId).first<{ r: number }>()
   const pointsNow = balance?.points ?? 0
   const sumPoints = sumRow?.s ?? 0
-  const redeemed = rsumRow?.r ?? 0
-  const effective = sumPoints - redeemed
-  if (pointsNow !== effective) {
+  if (pointsNow !== sumPoints) {
     await c.env.DB.prepare('INSERT OR IGNORE INTO balances (user_id, points) VALUES (?, 0)').bind(userId).run()
-    await c.env.DB.prepare('UPDATE balances SET points = ? WHERE user_id = ?').bind(effective, userId).run()
+    await c.env.DB.prepare('UPDATE balances SET points = ? WHERE user_id = ?').bind(sumPoints, userId).run()
   }
   const events = await c.env.DB.prepare('SELECT id, title, points, created_at FROM events WHERE user_id = ? ORDER BY id DESC LIMIT 100').bind(userId).all()
   const rewards = await c.env.DB.prepare('SELECT id, name, cost_points, stock, description FROM rewards WHERE enabled = 1 ORDER BY id DESC').all()
-  return c.json({ userId, username, balance: effective, events: events.results, rewards: rewards.results })
+  return c.json({ userId, username, balance: sumPoints, events: events.results, rewards: rewards.results })
 })
 
 app.post('/api/events', async (c: Context<{ Bindings: Env }>) => {
@@ -84,18 +81,15 @@ app.get('/api/overview', async (c: Context<{ Bindings: Env }>) => {
   if (!user) return c.json({ balance: 0, events: [], rewards: [] })
   const balance = await c.env.DB.prepare('SELECT points FROM balances WHERE user_id = ?').bind(user.id).first<{ points: number }>()
   const sumRow = await c.env.DB.prepare('SELECT COALESCE(SUM(points), 0) AS s FROM events WHERE user_id = ?').bind(user.id).first<{ s: number }>()
-  const rsumRow = await c.env.DB.prepare('SELECT COALESCE(SUM(cost_points), 0) AS r FROM redemptions WHERE user_id = ? AND status = "approved"').bind(user.id).first<{ r: number }>()
   const pointsNow = balance?.points ?? 0
   const sumPoints = sumRow?.s ?? 0
-  const redeemed = rsumRow?.r ?? 0
-  const effective = sumPoints - redeemed
-  if (pointsNow !== effective) {
+  if (pointsNow !== sumPoints) {
     await c.env.DB.prepare('INSERT OR IGNORE INTO balances (user_id, points) VALUES (?, 0)').bind(user.id).run()
-    await c.env.DB.prepare('UPDATE balances SET points = ? WHERE user_id = ?').bind(effective, user.id).run()
+    await c.env.DB.prepare('UPDATE balances SET points = ? WHERE user_id = ?').bind(sumPoints, user.id).run()
   }
   const events = await c.env.DB.prepare('SELECT id, title, points, created_at FROM events WHERE user_id = ? ORDER BY id DESC LIMIT 100').bind(user.id).all()
   const rewards = await c.env.DB.prepare('SELECT id, name, cost_points, stock, description FROM rewards WHERE enabled = 1 ORDER BY id DESC').all()
-  return c.json({ balance: effective, events: events.results, rewards: rewards.results })
+  return c.json({ balance: sumPoints, events: events.results, rewards: rewards.results })
 })
 
 async function handleRedeem(c: Context<{ Bindings: Env }>, username: string, rewardId: number) {
@@ -104,17 +98,14 @@ async function handleRedeem(c: Context<{ Bindings: Env }>, username: string, rew
   if (!user) return c.json({ error: 'user_not_found' }, 404)
   const reward = await c.env.DB.prepare('SELECT id, name, cost_points, stock, enabled FROM rewards WHERE id = ?').bind(rewardId).first<{ id: number; cost_points: number; stock: number | null; enabled: number }>()
   if (!reward || reward.enabled !== 1) return c.json({ error: 'reward_unavailable' }, 400)
-  // self-heal: reconcile balances from events minus approved redemptions
+  // self-heal: reconcile balances from events only
   const sumRow = await c.env.DB.prepare('SELECT COALESCE(SUM(points), 0) AS s FROM events WHERE user_id = ?').bind(user.id).first<{ s: number }>()
-  const rsumRow = await c.env.DB.prepare('SELECT COALESCE(SUM(cost_points), 0) AS r FROM redemptions WHERE user_id = ? AND status = "approved"').bind(user.id).first<{ r: number }>()
   const balRow = await c.env.DB.prepare('SELECT points FROM balances WHERE user_id = ?').bind(user.id).first<{ points: number }>()
   const sumPoints = sumRow?.s ?? 0
-  const redeemed = rsumRow?.r ?? 0
-  const shouldBe = sumPoints - redeemed
   const balPoints = balRow?.points ?? 0
-  if (balPoints !== shouldBe) {
+  if (balPoints !== sumPoints) {
     await c.env.DB.prepare('INSERT OR IGNORE INTO balances (user_id, points) VALUES (?, 0)').bind(user.id).run()
-    await c.env.DB.prepare('UPDATE balances SET points = ? WHERE user_id = ?').bind(shouldBe, user.id).run()
+    await c.env.DB.prepare('UPDATE balances SET points = ? WHERE user_id = ?').bind(sumPoints, user.id).run()
   }
   const bal = await c.env.DB.prepare('SELECT points FROM balances WHERE user_id = ?').bind(user.id).first<{ points: number }>()
   if ((bal?.points ?? 0) < reward.cost_points) return c.json({ error: 'insufficient_points', balance: bal?.points ?? 0, need: reward.cost_points }, 400)
