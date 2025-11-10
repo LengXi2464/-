@@ -92,12 +92,11 @@ app.get('/api/overview', async (c: Context<{ Bindings: Env }>) => {
   return c.json({ balance: sumPoints, events: events.results, rewards: rewards.results })
 })
 
-app.post('/api/redeem', async (c: Context<{ Bindings: Env }>) => {
-  const { username, reward_id } = await c.req.json<{ username: string; reward_id: number }>()
-  if (!username || !reward_id) return c.json({ error: 'invalid_payload' }, 400)
+async function handleRedeem(c: Context<{ Bindings: Env }>, username: string, rewardId: number) {
+  if (!username || !rewardId) return c.json({ error: 'invalid_payload' }, 400)
   const user = await c.env.DB.prepare('SELECT id FROM users WHERE username = ?').bind(username).first<{ id: number }>()
   if (!user) return c.json({ error: 'user_not_found' }, 404)
-  const reward = await c.env.DB.prepare('SELECT id, name, cost_points, stock, enabled FROM rewards WHERE id = ?').bind(reward_id).first<{ id: number; cost_points: number; stock: number | null; enabled: number }>()
+  const reward = await c.env.DB.prepare('SELECT id, name, cost_points, stock, enabled FROM rewards WHERE id = ?').bind(rewardId).first<{ id: number; cost_points: number; stock: number | null; enabled: number }>()
   if (!reward || reward.enabled !== 1) return c.json({ error: 'reward_unavailable' }, 400)
   // self-heal: reconcile balances from events
   const sumRow = await c.env.DB.prepare('SELECT COALESCE(SUM(points), 0) AS s FROM events WHERE user_id = ?').bind(user.id).first<{ s: number }>()
@@ -117,8 +116,7 @@ app.post('/api/redeem', async (c: Context<{ Bindings: Env }>) => {
       .prepare('UPDATE rewards SET stock = stock - 1 WHERE id = ? AND stock > 0')
       .bind(reward.id)
       .run()
-    // @ts-expect-error D1 meta
-    if (!dec || (dec.meta && dec.meta.changes === 0)) {
+    if (!dec || (dec as any).meta && (dec as any).meta.changes === 0) {
       return c.json({ error: 'out_of_stock' }, 400)
     }
   }
@@ -127,8 +125,7 @@ app.post('/api/redeem', async (c: Context<{ Bindings: Env }>) => {
     .prepare('UPDATE balances SET points = points - ? WHERE user_id = ? AND points >= ?')
     .bind(reward.cost_points, user.id, reward.cost_points)
     .run()
-  // @ts-expect-error D1 meta
-  if (!decBal || (decBal.meta && decBal.meta.changes === 0)) {
+  if (!decBal || (decBal as any).meta && (decBal as any).meta.changes === 0) {
     // rollback stock if we deducted it
     if (reward.stock !== null) {
       await c.env.DB.prepare('UPDATE rewards SET stock = stock + 1 WHERE id = ?').bind(reward.id).run()
@@ -142,6 +139,19 @@ app.post('/api/redeem', async (c: Context<{ Bindings: Env }>) => {
     .run()
   const balance = await c.env.DB.prepare('SELECT points FROM balances WHERE user_id = ?').bind(user.id).first<{ points: number }>()
   return c.json({ ok: true, balance: balance?.points ?? 0 })
+}
+
+app.post('/api/redeem', async (c: Context<{ Bindings: Env }>) => {
+  const body = await c.req.json<{ username: string; reward_id: number }>().catch(() => ({ username: '', reward_id: 0 }))
+  const { username, reward_id } = body
+  return handleRedeem(c, username, Number(reward_id))
+})
+
+// GET fallback: /api/redeem?username=xxx&reward_id=123
+app.get('/api/redeem', async (c: Context<{ Bindings: Env }>) => {
+  const username = c.req.query('username') || ''
+  const reward_id = Number(c.req.query('reward_id') || '0')
+  return handleRedeem(c, username, reward_id)
 })
 
 app.post('/api/admin/rewards', async (c: Context<{ Bindings: Env }>) => {
