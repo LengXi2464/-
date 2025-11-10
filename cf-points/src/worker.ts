@@ -99,14 +99,47 @@ app.post('/api/redeem', async (c: Context<{ Bindings: Env }>) => {
   if (!user) return c.json({ error: 'user_not_found' }, 404)
   const reward = await c.env.DB.prepare('SELECT id, name, cost_points, stock, enabled FROM rewards WHERE id = ?').bind(reward_id).first<{ id: number; cost_points: number; stock: number | null; enabled: number }>()
   if (!reward || reward.enabled !== 1) return c.json({ error: 'reward_unavailable' }, 400)
-  const bal = await c.env.DB.prepare('SELECT points FROM balances WHERE user_id = ?').bind(user.id).first<{ points: number }>()
-  if ((bal?.points ?? 0) < reward.cost_points) return c.json({ error: 'insufficient_points' }, 400)
-  if (reward.stock !== null && reward.stock <= 0) return c.json({ error: 'out_of_stock' }, 400)
-  await c.env.DB.prepare('INSERT INTO redemptions (user_id, reward_id, cost_points, status) VALUES (?, ?, ?, "approved")').bind(user.id, reward.id, reward.cost_points).run()
-  await c.env.DB.prepare('UPDATE balances SET points = points - ? WHERE user_id = ?').bind(reward.cost_points, user.id).run()
-  if (reward.stock !== null) {
-    await c.env.DB.prepare('UPDATE rewards SET stock = stock - 1 WHERE id = ?').bind(reward.id).run()
+  // self-heal: reconcile balances from events
+  const sumRow = await c.env.DB.prepare('SELECT COALESCE(SUM(points), 0) AS s FROM events WHERE user_id = ?').bind(user.id).first<{ s: number }>()
+  const balRow = await c.env.DB.prepare('SELECT points FROM balances WHERE user_id = ?').bind(user.id).first<{ points: number }>()
+  const sumPoints = sumRow?.s ?? 0
+  const balPoints = balRow?.points ?? 0
+  if (balPoints !== sumPoints) {
+    await c.env.DB.prepare('INSERT OR IGNORE INTO balances (user_id, points) VALUES (?, 0)').bind(user.id).run()
+    await c.env.DB.prepare('UPDATE balances SET points = ? WHERE user_id = ?').bind(sumPoints, user.id).run()
   }
+  const bal = await c.env.DB.prepare('SELECT points FROM balances WHERE user_id = ?').bind(user.id).first<{ points: number }>()
+  if ((bal?.points ?? 0) < reward.cost_points) return c.json({ error: 'insufficient_points', balance: bal?.points ?? 0, need: reward.cost_points }, 400)
+  if (reward.stock !== null && reward.stock <= 0) return c.json({ error: 'out_of_stock' }, 400)
+  // race-safe conditional updates
+  if (reward.stock !== null) {
+    const dec = await c.env.DB
+      .prepare('UPDATE rewards SET stock = stock - 1 WHERE id = ? AND stock > 0')
+      .bind(reward.id)
+      .run()
+    // @ts-expect-error D1 meta
+    if (!dec || (dec.meta && dec.meta.changes === 0)) {
+      return c.json({ error: 'out_of_stock' }, 400)
+    }
+  }
+
+  const decBal = await c.env.DB
+    .prepare('UPDATE balances SET points = points - ? WHERE user_id = ? AND points >= ?')
+    .bind(reward.cost_points, user.id, reward.cost_points)
+    .run()
+  // @ts-expect-error D1 meta
+  if (!decBal || (decBal.meta && decBal.meta.changes === 0)) {
+    // rollback stock if we deducted it
+    if (reward.stock !== null) {
+      await c.env.DB.prepare('UPDATE rewards SET stock = stock + 1 WHERE id = ?').bind(reward.id).run()
+    }
+    return c.json({ error: 'insufficient_points' }, 400)
+  }
+
+  await c.env.DB
+    .prepare('INSERT INTO redemptions (user_id, reward_id, cost_points, status) VALUES (?, ?, ?, "approved")')
+    .bind(user.id, reward.id, reward.cost_points)
+    .run()
   const balance = await c.env.DB.prepare('SELECT points FROM balances WHERE user_id = ?').bind(user.id).first<{ points: number }>()
   return c.json({ ok: true, balance: balance?.points ?? 0 })
 })
